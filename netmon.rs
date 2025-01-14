@@ -1,9 +1,15 @@
 //! Rust Network Monitor driver.
 
+mod netfilter;
+
 use core::pin::Pin;
 use kernel::error::to_result;
-use kernel::netfilter::{init_net, nf_hook_ops, nf_register_net_hook, nf_unregister_net_hook};
+use kernel::netfilter::{
+    init_net, nf_hook_state, nf_inet_hooks_NF_INET_PRE_ROUTING, nf_register_net_hook,
+    nf_unregister_net_hook, sk_buff,
+};
 use kernel::prelude::*;
+use netfilter::{HookPriority, HookResponse, NetFilterHookOps, ProtocolFamily};
 
 module! {
     type: NetMon,
@@ -23,6 +29,14 @@ unsafe impl Sync for NetMon {}
 impl kernel::Module for NetMon {
     fn init(_: &'static ThisModule) -> Result<Self> {
         let mut nfho: Pin<Box<NetFilterHookOps>> = Box::pin_init(NetFilterHookOps::new())?;
+
+        {
+            let mut nfho = nfho.as_mut();
+            nfho.set_hook(Some(hook_fn));
+            nfho.set_hooknum(nf_inet_hooks_NF_INET_PRE_ROUTING);
+            nfho.set_protocol_family(ProtocolFamily::Inet);
+            nfho.set_priority(HookPriority::First)
+        }
 
         to_result(unsafe {
             nf_register_net_hook(
@@ -48,23 +62,19 @@ impl Drop for NetMon {
     }
 }
 
-#[pin_data]
-struct NetFilterHookOps {
-    #[pin]
-    inner: nf_hook_ops,
-}
-
-impl NetFilterHookOps {
-    fn new() -> impl PinInit<Self> {
-        // Took implementaion from the bindgen, because I couldn't use
-        // the `default` function of the `Default` trait.
-        let nfho: nf_hook_ops = {
-            let mut s = ::core::mem::MaybeUninit::<nf_hook_ops>::uninit();
-            unsafe {
-                ::core::ptr::write_bytes(s.as_mut_ptr(), 0, 1);
-                s.assume_init()
-            }
-        };
-        pin_init!(Self { inner: nfho })
+pub unsafe extern "C" fn hook_fn(
+    _priv_: *mut core::ffi::c_void,
+    skb: *mut sk_buff,
+    _state: *const nf_hook_state,
+) -> core::ffi::c_uint {
+    let skb_option = unsafe { skb.as_ref() };
+    pr_info!("I am in this thing!");
+    match skb_option {
+        Some(_skb) => {
+            return HookResponse::Accept.into();
+        }
+        None => {
+            return HookResponse::Accept.into();
+        }
     }
 }
