@@ -1,6 +1,6 @@
 //! Network filter abstractions.
 
-use kernel::netfilter::{nf_hook_ops, nf_hookfn, nf_inet_hooks};
+use kernel::netfilter::{nf_hook_ops, nf_hookfn};
 use kernel::prelude::*;
 
 #[pin_data]
@@ -35,8 +35,8 @@ impl NetFilterHookOps {
         self.inner.hook = hook
     }
 
-    pub(crate) fn set_hooknum(&mut self, hooknum: nf_inet_hooks) {
-        self.inner.hooknum = hooknum
+    pub(crate) fn set_hooknum(&mut self, hooknum: HookNum) {
+        self.inner.hooknum = hooknum.into()
     }
 
     pub(crate) fn set_protocol_family(&mut self, pf: ProtocolFamily) {
@@ -157,6 +157,27 @@ impl HookResponse {
 
 impl From<HookResponse> for u32 {
     fn from(value: HookResponse) -> Self {
+        value as u32
+    }
+}
+
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HookNum {
+    PreRouting = 0,
+    LocalIn = 1,
+    Forward = 2,
+    LocalOut = 3,
+    PostRouting = 4,
+    NumHooks = 5,
+}
+
+impl HookNum {
+    pub const INGRESS: HookNum = HookNum::NumHooks;
+}
+
+impl From<HookNum> for u32 {
+    fn from(value: HookNum) -> Self {
         value as u32
     }
 }

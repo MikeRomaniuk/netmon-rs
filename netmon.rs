@@ -5,11 +5,11 @@ mod netfilter;
 use core::pin::Pin;
 use kernel::error::to_result;
 use kernel::netfilter::{
-    init_net, nf_hook_state, nf_inet_hooks_NF_INET_PRE_ROUTING, nf_register_net_hook,
+    init_net, nf_hook_state, nf_register_net_hook,
     nf_unregister_net_hook, sk_buff,
 };
 use kernel::prelude::*;
-use netfilter::{HookPriority, HookResponse, NetFilterHookOps, ProtocolFamily};
+use netfilter::{HookPriority, HookResponse, NetFilterHookOps, ProtocolFamily, HookNum};
 
 module! {
     type: NetMon,
@@ -33,7 +33,7 @@ impl kernel::Module for NetMon {
         {
             let mut nfho = nfho.as_mut();
             nfho.set_hook(Some(hook_fn));
-            nfho.set_hooknum(nf_inet_hooks_NF_INET_PRE_ROUTING);
+            nfho.set_hooknum(HookNum::PreRouting);
             nfho.set_protocol_family(ProtocolFamily::Inet);
             nfho.set_priority(HookPriority::First)
         }
