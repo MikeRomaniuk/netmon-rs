@@ -77,15 +77,15 @@ pub unsafe extern "C" fn hook_fn(
     skb: *mut sk_buff,
     _state: *const nf_hook_state,
 ) -> core::ffi::c_uint {
-// SAFETY: if `skb` is a null-pointer, the [`Option::None`] is returned by the `as_ref()` function.
+    // SAFETY: if `skb` is a null-pointer, the [`Option::None`] is returned by the `as_ref()` function.
     let skb_option = unsafe { skb.as_ref() };
     pr_info!("I am in this thing!");
     match skb_option {
         Some(_skb) => {
-            return HookResponse::Accept.into();
+            HookResponse::Accept.into()
         }
         None => {
-            return HookResponse::Accept.into();
+            HookResponse::Accept.into()
         }
     }
 }
