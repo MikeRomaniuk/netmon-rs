@@ -62,11 +62,22 @@ impl Drop for NetMon {
     }
 }
 
+/// Netfilter hook function. 
+/// 
+/// This function will be registered in the kernel 
+/// to be called at specific points in the network stack.
+/// 
+/// Function registration is done by inserting `nf_hook_ops` with the [`nf_register_hook`] function.
+/// 
+/// # Safety
+/// 
+/// This function is safe, since the validity of the `skb` is checked.
 pub unsafe extern "C" fn hook_fn(
     _priv_: *mut core::ffi::c_void,
     skb: *mut sk_buff,
     _state: *const nf_hook_state,
 ) -> core::ffi::c_uint {
+// SAFETY: if `skb` is a null-pointer, the [`Option::None`] is returned by the `as_ref()` function.
     let skb_option = unsafe { skb.as_ref() };
     pr_info!("I am in this thing!");
     match skb_option {
