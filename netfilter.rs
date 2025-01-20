@@ -378,6 +378,7 @@ impl SkBuff {
     }
 
     pub(crate) fn transport_header(&self) -> *mut u8 {
+        // SAFETY: The existence of a shared reference means `self.0` is valid.
         unsafe {
             core::ptr::addr_of!((*self.0.get()).head)
                 .read()
@@ -455,10 +456,12 @@ impl TcpHeader {
     }
 
     pub(crate) fn destination_port(&self) -> u16 {
+        // SAFETY: The existence of a shared reference means `self.0` is valid.
         unsafe { core::ptr::addr_of!((*self.0.get()).dest).read() }.swap_bytes()
     }
 
     pub(crate) fn source_port(&self) -> u16 {
+        // SAFETY: The existence of a shared reference means `self.0` is valid.
         unsafe { core::ptr::addr_of!((*self.0.get()).source).read() }.swap_bytes()
     }
 }
@@ -480,10 +483,12 @@ impl UdpHeader {
     }
 
     pub(crate) fn destination_port(&self) -> u16 {
+        // SAFETY: The existence of a shared reference means `self.0` is valid.
         unsafe { core::ptr::addr_of!((*self.0.get()).dest).read() }
     }
 
     pub(crate) fn source_port(&self) -> u16 {
+        // SAFETY: The existence of a shared reference means `self.0` is valid.
         unsafe { core::ptr::addr_of!((*self.0.get()).source).read() }
     }
 }

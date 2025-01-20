@@ -37,6 +37,7 @@ impl NetMon {
         let source_addr = iph.source_addr();
         let destination_addr = iph.destination_addr();
 
+        // SAFETY: we are in sync context, so it's fine to operate with mutable statisc.
         if unsafe {
             !ADDRS.is_empty()
                 && (!ADDRS.contains(&source_addr) && !ADDRS.contains(&destination_addr))
@@ -46,6 +47,7 @@ impl NetMon {
 
         let protocol = iph.protocol();
 
+        // SAFETY: we are in sync context, so it's fine to operate with mutable statisc.
         if unsafe { !PROTOCOLS.is_empty() && !PROTOCOLS.contains(&protocol) } {
             return;
         }
@@ -66,6 +68,7 @@ impl NetMon {
             }
         };
 
+        // SAFETY: we are in sync context, so it's fine to operate with mutable statisc.
         if unsafe {
             !PORTS.is_empty()
                 && (!PORTS.contains(&source_port) && !PORTS.contains(&destination_port))
@@ -137,6 +140,7 @@ impl kernel::Module for NetMon {
 
         let netmon = NetMon::new(nfho)?;
 
+        // SAFETY: we are in sync context, so it's fine to operate with mutable statisc.
         unsafe {
             PORTS.try_push(443)?;
             PROTOCOLS.try_push(IpProtocol::Tcp)?;
