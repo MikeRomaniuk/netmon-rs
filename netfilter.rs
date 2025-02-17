@@ -1,17 +1,25 @@
 //! Network filter abstractions.
 
 use core::cell::UnsafeCell;
-use kernel::netfilter::{in_addr, iphdr, nf_hook_ops, nf_hookfn, sk_buff, tcphdr, udphdr};
+use kernel::netfilter::{
+    in_addr, iphdr, net, nf_hook_ops, nf_hookfn, nf_register_net_hook, nf_unregister_net_hook,
+    sk_buff, tcphdr, udphdr,
+};
 // `netfilter` is my bindings crate with all headers I need.
+use crate::error;
+use kernel::error::to_result;
 use kernel::netfilter;
 use kernel::prelude::*;
 
+/// A safe wrapper around the kernel's [`struct nf_hook_ops`]: srctree/include/linux/netfilter.h.
+/// Manages registration and configuration of network packet filtering hooks.
 #[pin_data]
 pub struct NetFilterHookOps {
     #[pin]
     pub(crate) inner: nf_hook_ops,
 }
 
+/// Provides read-only access to the underlying netfilter hook operations.
 impl core::ops::Deref for NetFilterHookOps {
     type Target = nf_hook_ops;
 
@@ -20,7 +28,9 @@ impl core::ops::Deref for NetFilterHookOps {
     }
 }
 
+// Implement the necessary functions.
 impl NetFilterHookOps {
+    /// Creates a new instance of NetFilterHookOps with zeroed memory.
     pub(crate) fn new() -> impl PinInit<Self> {
         // Took implementaion from the bindgen, because I couldn't use
         // the `default` function of the `Default` trait.
@@ -34,20 +44,42 @@ impl NetFilterHookOps {
         pin_init!(Self { inner: nfho })
     }
 
+    /// Sets the hook function to be called when packets match the filter.
     pub(crate) fn set_hook(&mut self, hook: nf_hookfn) {
         self.inner.hook = hook
     }
 
+    /// Configures which hook point in the networking stack to attach to.
     pub(crate) fn set_hooknum(&mut self, hooknum: HookNum) {
         self.inner.hooknum = hooknum.into()
     }
 
+    /// Specifies the protocol family this hook operates on.
     pub(crate) fn set_protocol_family(&mut self, pf: ProtocolFamily) {
         self.inner.pf = pf.into()
     }
 
+    /// Sets the priority level of this hook relative to other hooks.
     pub(crate) fn set_priority(&mut self, priority: HookPriority) {
         self.inner.priority = priority.into()
+    }
+
+    /// Registers this netfilter hook with the specified network namespace.
+    pub(crate) fn register(&mut self, net: &mut net) -> Result<(), Error> {
+        // SAFETY: The net pointer and hook ops reference remain valid for the duration
+        // of the call since they are borrowed mutably. The hook ops struct should be valid
+        // as long as the hook is registered.
+        to_result(unsafe { nf_register_net_hook(net as *mut _, &self.inner as *const _) })?;
+        Ok(())
+    }
+
+    /// Unregisters this netfilter hook from the specified network namespace.
+    pub(crate) fn unregister(&mut self, net: &mut net) {
+        // SAFETY: The net pointer and hook ops reference remain valid for the duration
+        // of the call since they are borrowed mutably.
+        unsafe {
+            nf_unregister_net_hook(net as *mut _, &self.inner as *const _);
+        }
     }
 }
 
@@ -226,7 +258,7 @@ impl From<IpProtocol> for u32 {
 }
 
 impl TryFrom<u32> for IpProtocol {
-    type Error = &'static str;
+    type Error = error::Error;
 
     fn try_from(value: u32) -> Result<Self, Self::Error> {
         match value {
@@ -259,7 +291,10 @@ impl TryFrom<u32> for IpProtocol {
             netfilter::IPPROTO_RAW => Ok(Self::Raw),
             netfilter::IPPROTO_MPTCP => Ok(Self::Mptcp),
             netfilter::IPPROTO_MAX => Ok(Self::Max),
-            _ => Err("unknown protocol value"),
+            _ => Err(error::Error::new(
+                "unknown protocol value",
+                error::Kind::Unknown,
+            )),
         }
     }
 }
@@ -269,11 +304,11 @@ impl TryFrom<u32> for IpProtocol {
 pub(crate) struct IpHeader(UnsafeCell<iphdr>);
 
 impl IpHeader {
-    pub(crate) fn protocol(&self) -> IpProtocol {
+    pub(crate) fn protocol(&self) -> Result<IpProtocol, error::Error> {
         // SAFETY: The existence of a shared reference means `self.0` is valid.
-        u32::from(unsafe { core::ptr::addr_of!((*self.0.get()).protocol).read() })
-            .try_into()
-            .expect("could not get protocol")
+        IpProtocol::try_from(u32::from(unsafe {
+            core::ptr::addr_of!((*self.0.get()).protocol).read()
+        }))
     }
 
     pub(crate) fn source_addr(&self) -> Ipv4Addr {
@@ -288,6 +323,18 @@ impl IpHeader {
         let s_addr =
             unsafe { core::ptr::addr_of!((*self.0.get()).__bindgen_anon_1.addrs.daddr).read() };
         Ipv4Addr(in_addr { s_addr })
+    }
+
+    /// Creates a reference to an [`IpHeader`] from a valid pointer.
+    ///
+    /// # Safety
+    ///
+    /// The caller must ensure that `ptr` is valid and remains valid for the lifetime of the
+    /// returned [`IpHeader`] instance.
+    pub(crate) unsafe fn from_ptr<'a>(ptr: *const iphdr) -> &'a IpHeader {
+        // SAFETY: The safety requirements guarantee the validity of the dereference, while the
+        // `IpHeader` type being transparent makes the cast ok.
+        unsafe { &*ptr.cast() }
     }
 }
 /// Wraps the kernel's `struct sk_buff`.
@@ -320,14 +367,13 @@ impl SkBuff {
         unsafe { core::ptr::addr_of!((*self.0.get()).data_len).read() }
     }
 
-    pub(crate) fn mac_header(&self) -> &[u8] {
-        let len = if self.is_nonlinear() {
+    pub(crate) fn mac_header(&self) -> Result<&[u8], error::Error> {
+        let len: usize = if self.is_nonlinear() {
             self.data_len()
         } else {
             self.len()
         }
-        .try_into()
-        .expect("could not convert length of mac header");
+        .try_into()?;
 
         // SAFETY: The existence of a shared reference means `self.0` is valid.
         let data = unsafe {
@@ -344,7 +390,7 @@ impl SkBuff {
 
         // SAFETY: The `struct sk_buff` conventions guarantee that at least `skb_mac_header_len(skb)` bytes
         // are valid from `skb->mac_header`.
-        unsafe { core::slice::from_raw_parts(data, len) }
+        Ok(unsafe { core::slice::from_raw_parts(data, len) })
     }
 
     fn get_network_header_addr(&self) -> *mut u8 {
@@ -366,11 +412,8 @@ impl SkBuff {
         }
     }
 
-    pub(crate) fn get_ip_header(&self) -> &IpHeader {
-        let addr = self.get_network_header_addr();
-        // SAFETY: The safety requirements guarantee the validity of the dereference, while the
-        // `IpHeader` type being transparent makes the cast ok.
-        unsafe { &*addr.cast::<IpHeader>() }
+    pub(crate) fn ip_header(&self) -> *mut u8 {
+        self.get_network_header_addr()
     }
 
     pub(crate) fn is_nonlinear(&self) -> bool {
@@ -490,5 +533,111 @@ impl UdpHeader {
     pub(crate) fn source_port(&self) -> u16 {
         // SAFETY: The existence of a shared reference means `self.0` is valid.
         unsafe { core::ptr::addr_of!((*self.0.get()).source).read() }
+    }
+}
+
+// pub(crate) trait TransportLayerProtocol<'a> {
+//     fn destination_port(&'a self) -> u16;
+
+//     fn destination_addr(&'a self) -> Ipv4Addr;
+
+//     fn source_port(&'a self) -> u16;
+
+//     fn source_addr(&'a self) -> Ipv4Addr;
+
+//     fn from_skb(sk_buff: &'a SkBuff) -> &'a Self;
+// }
+
+// pub(crate) struct Tcp<'a> {
+//     ip_header: &'a IpHeader,
+//     tcp_header: &'a TcpHeader,
+// }
+
+// impl<'a> TransportLayerProtocol<'a> for Tcp<'a> {
+//     fn from_skb(sk_buff: &'a SkBuff) -> &'a Self {
+//         let ip_header = unsafe { IpHeader::from_ptr(sk_buff.ip_header() as *const _) };
+//         let tcp_header =
+//     }
+// }
+
+pub(crate) enum TransportLayerProtocol<'a> {
+    Udp { udp_header: &'a UdpHeader },
+    Tcp { tcp_header: &'a TcpHeader },
+}
+
+impl<'a> TransportLayerProtocol<'a> {
+    pub(crate) fn new(sk_buff: &'a SkBuff, protocol: IpProtocol) -> Result<Self, error::Error> {
+        match protocol {
+            IpProtocol::Tcp => {
+                let tcp_header =
+                    unsafe { TcpHeader::from_ptr(sk_buff.transport_header() as *const _) };
+                Ok(Self::Tcp { tcp_header })
+            }
+            IpProtocol::Udp => {
+                let udp_header =
+                    unsafe { UdpHeader::from_ptr(sk_buff.transport_header() as *const _) };
+                Ok(Self::Udp { udp_header })
+            }
+            _ => Err(error::Error::new(
+                "unsupported protocol",
+                error::Kind::Unsupported,
+            )),
+        }
+    }
+
+    pub(crate) fn destination_port(&self) -> u16 {
+        match self {
+            Self::Udp { udp_header } => udp_header.destination_port(),
+            Self::Tcp { tcp_header } => tcp_header.destination_port(),
+        }
+    }
+
+    pub(crate) fn source_port(&self) -> u16 {
+        match self {
+            Self::Udp { udp_header } => udp_header.source_port(),
+            Self::Tcp { tcp_header } => tcp_header.source_port(),
+        }
+    }
+}
+
+pub(crate) struct TransportPacket<'a> {
+    ip_header: &'a IpHeader,
+    transport_layer: TransportLayerProtocol<'a>,
+}
+
+impl<'a> TransportPacket<'a> {
+    pub(crate) fn from_skb(sk_buff: &'a SkBuff) -> Result<Self, error::Error> {
+        let ip_header = unsafe { IpHeader::from_ptr(sk_buff.ip_header() as *const _) };
+
+        let protocol = ip_header.protocol()?;
+
+        let transport_layer = TransportLayerProtocol::new(sk_buff, protocol)?;
+
+        Ok(Self {
+            ip_header,
+            transport_layer,
+        })
+    }
+
+    pub(crate) fn destination_addr(&self) -> Ipv4Addr {
+        self.ip_header.destination_addr()
+    }
+
+    pub(crate) fn source_addr(&self) -> Ipv4Addr {
+        self.ip_header.source_addr()
+    }
+
+    pub(crate) fn destination_port(&self) -> u16 {
+        self.transport_layer.destination_port()
+    }
+
+    pub(crate) fn source_port(&self) -> u16 {
+        self.transport_layer.source_port()
+    }
+
+    pub(crate) fn protocol(&self) -> IpProtocol {
+        self.ip_header
+            .protocol()
+            .expect("if instance exists, the protocol should be valid")
     }
 }

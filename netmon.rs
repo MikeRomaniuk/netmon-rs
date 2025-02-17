@@ -1,16 +1,16 @@
 //! Rust Network Monitor driver.
 
+mod error;
 mod netfilter;
 
 use core::pin::Pin;
-use kernel::error::to_result;
-// `netfilter` is my bindings crate with all headers I need.
-use kernel::netfilter::{nf_hook_state, nf_register_net_hook, nf_unregister_net_hook, sk_buff};
+// `netfilter` is my bindings crate inside the Linux kernel sourcetree with all headers I need.
+use kernel::netfilter::{nf_hook_state, sk_buff};
 use kernel::pr_cont;
 use kernel::prelude::*;
 use netfilter::{
     HookNum, HookPriority, HookResponse, IpProtocol, Ipv4Addr, NetFilterHookOps, ProtocolFamily,
-    SkBuff, TcpHeader, UdpHeader,
+    SkBuff, TransportPacket,
 };
 
 module! {
@@ -31,61 +31,50 @@ struct NetMon {
 }
 
 impl NetMon {
-    fn handle_packet(skb: &SkBuff) {
-        let iph = skb.get_ip_header();
+    fn handle_packet(skb: &SkBuff) -> Result<(), error::Error> {
+        let packet = TransportPacket::from_skb(skb)?;
 
-        let source_addr = iph.source_addr();
-        let destination_addr = iph.destination_addr();
+        let source_addr = packet.source_addr();
+        let destination_addr = packet.destination_addr();
 
         // SAFETY: we are in sync context, so it's fine to operate with mutable statisc.
         if unsafe {
             !ADDRS.is_empty()
                 && (!ADDRS.contains(&source_addr) && !ADDRS.contains(&destination_addr))
         } {
-            return;
+            return Ok(());
         }
 
-        let protocol = iph.protocol();
+        let protocol = packet.protocol();
 
         // SAFETY: we are in sync context, so it's fine to operate with mutable statisc.
         if unsafe { !PROTOCOLS.is_empty() && !PROTOCOLS.contains(&protocol) } {
-            return;
+            return Ok(());
         }
 
-        // TODO: abstract this with TransportLayerProtocol trait;
-        let (destination_port, source_port) = match protocol {
-            IpProtocol::Tcp => {
-                let tcp = unsafe { TcpHeader::from_ptr(skb.transport_header() as *const _) };
-                (tcp.destination_port(), tcp.source_port())
-            }
-            IpProtocol::Udp => {
-                let udp = unsafe { UdpHeader::from_ptr(skb.transport_header() as *const _) };
-                (udp.destination_port(), udp.source_port())
-            }
-            _ => {
-                pr_info!("Unsoported protocol {protocol:?}");
-                return;
-            }
-        };
+        let destination_port = packet.destination_port();
+        let source_port = packet.source_port();
 
-        // SAFETY: we are in sync context, so it's fine to operate with mutable statisc.
+        // SAFETY: we are in sync context, so it's fine to operate with mutable statics.
         if unsafe {
             !PORTS.is_empty()
                 && (!PORTS.contains(&source_port) && !PORTS.contains(&destination_port))
         } {
-            return;
+            return Ok(());
         }
 
         pr_info!("{protocol:?}: {source_addr:?}:{source_port} -> {destination_addr:?}:{destination_port}\n");
-        Self::print_packet(skb);
+        Self::print_packet(skb)?;
+
+        Ok(())
     }
 
-    fn print_packet(skb: &SkBuff) {
+    fn print_packet(skb: &SkBuff) -> Result<(), error::Error> {
         const ROW_SIZE: usize = 16;
 
         pr_info!("Packet hex dump:\n");
 
-        let data = skb.mac_header();
+        let data = skb.mac_header()?;
 
         for (line_num, chunk) in data.chunks(ROW_SIZE).enumerate() {
             pr_info!("{:0>6}\t", line_num * 10);
@@ -96,17 +85,15 @@ impl NetMon {
 
             pr_cont!("\n");
         }
+
+        Ok(())
     }
 
     fn new(mut nfho: Pin<Box<NetFilterHookOps>>) -> Result<Self, kernel::error::Error> {
         use kernel::netfilter::init_net;
 
-        to_result(unsafe {
-            nf_register_net_hook(
-                &mut init_net as *mut _,
-                &nfho.as_mut().get_unchecked_mut().inner as *const _,
-            )
-        })?;
+        // SAFETY: init_net should be valid at any point.
+        nfho.as_mut().register(unsafe { &mut init_net })?;
 
         Ok(Self { nfho })
     }
@@ -114,12 +101,8 @@ impl NetMon {
     fn unregister_net_hook(&mut self) {
         use kernel::netfilter::init_net;
 
-        unsafe {
-            nf_unregister_net_hook(
-                &mut init_net as *mut _,
-                &self.nfho.as_mut().get_unchecked_mut().inner as *const _,
-            );
-        }
+        // SAFETY: init_net should be valid at any point.
+        let _ = &self.nfho.unregister(unsafe { &mut init_net });
     }
 }
 
@@ -140,7 +123,7 @@ impl kernel::Module for NetMon {
 
         let netmon = NetMon::new(nfho)?;
 
-        // SAFETY: we are in sync context, so it's fine to operate with mutable statisc.
+        // SAFETY: we are in sync context, so it's fine to operate with mutable statics.
         unsafe {
             PORTS.try_push(443)?;
             PROTOCOLS.try_push(IpProtocol::Tcp)?;
@@ -179,7 +162,8 @@ pub unsafe extern "C" fn hook_fn(
         Some(_) => {
             // SAFETY: if `skb` was a null-pointer, we would never be in `Some` branch.
             let skb = unsafe { SkBuff::from_ptr(skb) };
-            NetMon::handle_packet(skb);
+            // We ignore the error, since we can't do something if it is the error.
+            let _ = NetMon::handle_packet(skb);
         }
         None => {
             pr_err!("skb is None");
