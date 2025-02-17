@@ -337,9 +337,8 @@ impl IpHeader {
         unsafe { &*ptr.cast() }
     }
 }
-/// Wraps the kernel's `struct sk_buff`.
-///
-/// Took part of the implementaion from an [`old API`](https://rust-for-linux.github.io/docs/rust/src/kernel/net.rs.html#65-99)
+
+/// Wrapper around the kernel's `struct sk_buff`.
 #[repr(transparent)]
 pub(crate) struct SkBuff(UnsafeCell<sk_buff>);
 
@@ -362,11 +361,13 @@ impl SkBuff {
         unsafe { core::ptr::addr_of!((*self.0.get()).len).read() }
     }
 
+    /// Returns the length of the data in the skb.
     pub(crate) fn data_len(&self) -> u32 {
         // SAFETY: The existence of a shared reference means `self.0` is valid.
         unsafe { core::ptr::addr_of!((*self.0.get()).data_len).read() }
     }
 
+    /// Returns a reference to the MAC header of the skb, ensuring it's within valid bounds.
     pub(crate) fn mac_header(&self) -> Result<&[u8], error::Error> {
         let len: usize = if self.is_nonlinear() {
             self.data_len()
@@ -393,7 +394,8 @@ impl SkBuff {
         Ok(unsafe { core::slice::from_raw_parts(data, len) })
     }
 
-    fn get_network_header_addr(&self) -> *mut u8 {
+    /// Returns the address of the network header within the skb.
+    pub(crate) fn ip_header_addr(&self) -> *mut u8 {
         // SAFETY: The existence of a shared reference means `self.0` is valid.
         unsafe {
             core::ptr::addr_of!((*self.0.get()).head)
@@ -412,14 +414,12 @@ impl SkBuff {
         }
     }
 
-    pub(crate) fn ip_header(&self) -> *mut u8 {
-        self.get_network_header_addr()
-    }
-
+    /// Determines if the skb is nonlinear, meaning its data is spread across multiple segments.
     pub(crate) fn is_nonlinear(&self) -> bool {
         self.data_len() != 0
     }
 
+    /// Returns the address of the transport layer header within the skb.
     pub(crate) fn transport_header(&self) -> *mut u8 {
         // SAFETY: The existence of a shared reference means `self.0` is valid.
         unsafe {
@@ -536,30 +536,6 @@ impl UdpHeader {
     }
 }
 
-// pub(crate) trait TransportLayerProtocol<'a> {
-//     fn destination_port(&'a self) -> u16;
-
-//     fn destination_addr(&'a self) -> Ipv4Addr;
-
-//     fn source_port(&'a self) -> u16;
-
-//     fn source_addr(&'a self) -> Ipv4Addr;
-
-//     fn from_skb(sk_buff: &'a SkBuff) -> &'a Self;
-// }
-
-// pub(crate) struct Tcp<'a> {
-//     ip_header: &'a IpHeader,
-//     tcp_header: &'a TcpHeader,
-// }
-
-// impl<'a> TransportLayerProtocol<'a> for Tcp<'a> {
-//     fn from_skb(sk_buff: &'a SkBuff) -> &'a Self {
-//         let ip_header = unsafe { IpHeader::from_ptr(sk_buff.ip_header() as *const _) };
-//         let tcp_header =
-//     }
-// }
-
 pub(crate) enum TransportLayerProtocol<'a> {
     Udp { udp_header: &'a UdpHeader },
     Tcp { tcp_header: &'a TcpHeader },
@@ -607,7 +583,7 @@ pub(crate) struct TransportPacket<'a> {
 
 impl<'a> TransportPacket<'a> {
     pub(crate) fn from_skb(sk_buff: &'a SkBuff) -> Result<Self, error::Error> {
-        let ip_header = unsafe { IpHeader::from_ptr(sk_buff.ip_header() as *const _) };
+        let ip_header = unsafe { IpHeader::from_ptr(sk_buff.ip_header_addr() as *const _) };
 
         let protocol = ip_header.protocol()?;
 
@@ -635,9 +611,7 @@ impl<'a> TransportPacket<'a> {
         self.transport_layer.source_port()
     }
 
-    pub(crate) fn protocol(&self) -> IpProtocol {
-        self.ip_header
-            .protocol()
-            .expect("if instance exists, the protocol should be valid")
+    pub(crate) fn protocol(&self) -> Result<IpProtocol, error::Error> {
+        self.ip_header.protocol()
     }
 }

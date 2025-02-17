@@ -45,7 +45,7 @@ impl NetMon {
             return Ok(());
         }
 
-        let protocol = packet.protocol();
+        let protocol = packet.protocol()?;
 
         // SAFETY: we are in sync context, so it's fine to operate with mutable statisc.
         if unsafe { !PROTOCOLS.is_empty() && !PROTOCOLS.contains(&protocol) } {
@@ -102,7 +102,7 @@ impl NetMon {
         use kernel::netfilter::init_net;
 
         // SAFETY: init_net should be valid at any point.
-        let _ = &self.nfho.unregister(unsafe { &mut init_net });
+        self.nfho.unregister(unsafe { &mut init_net });
     }
 }
 
@@ -162,8 +162,10 @@ pub unsafe extern "C" fn hook_fn(
         Some(_) => {
             // SAFETY: if `skb` was a null-pointer, we would never be in `Some` branch.
             let skb = unsafe { SkBuff::from_ptr(skb) };
-            // We ignore the error, since we can't do something if it is the error.
-            let _ = NetMon::handle_packet(skb);
+
+            if let Err(err) = NetMon::handle_packet(skb) {
+                pr_err!("Could not handle a packet: {err}")
+            }
         }
         None => {
             pr_err!("skb is None");
