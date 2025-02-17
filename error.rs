@@ -31,7 +31,7 @@ impl Display for Error {
 
 impl From<TryFromIntError> for Error {
     fn from(_: TryFromIntError) -> Self {
-        Error::new("Integer conversion failed", Kind::Conversion)
+        Error::new("integer conversion failed", Kind::Conversion)
     }
 }
 
