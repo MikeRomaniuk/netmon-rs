@@ -1,15 +1,19 @@
 //! Network filter abstractions.
 
+// Some bindings are not used in the code, but they are important for demonstration purpuses.
+#![allow(dead_code)]
+
 use core::cell::UnsafeCell;
-use kernel::netfilter::{
-    in_addr, iphdr, net, nf_hook_ops, nf_hookfn, nf_register_net_hook, nf_unregister_net_hook,
-    sk_buff, tcphdr, udphdr,
-};
-// `netfilter` is my bindings crate with all headers I need.
-use crate::error;
+
 use kernel::error::to_result;
 use kernel::netfilter;
+use kernel::netfilter::{
+    in_addr, iphdr, net, nf_hook_ops, nf_hookfn, nf_register_net_hook, nf_unregister_net_hook, sk_buff, tcphdr, udphdr,
+};
 use kernel::prelude::*;
+
+// `netfilter` is my bindings crate with all headers I need.
+use crate::error;
 
 /// A safe wrapper around the kernel's [`struct nf_hook_ops`]: srctree/include/linux/netfilter.h.
 /// Manages registration and configuration of network packet filtering hooks.
@@ -285,19 +289,17 @@ impl TryFrom<u32> for IpProtocol {
             netfilter::IPPROTO_RAW => Ok(Self::Raw),
             netfilter::IPPROTO_MPTCP => Ok(Self::Mptcp),
             netfilter::IPPROTO_MAX => Ok(Self::Max),
-            _ => Err(error::Error::new(
-                "unknown protocol value",
-                error::Kind::Unknown,
-            )),
+            _ => Err(error::Error::new("unknown protocol value", error::Kind::Unknown)),
         }
     }
 }
 
-/// Wraps the kernel's `struct iphdr`.
+/// Wraps the kernel's `[`struct iphdr`]: srctree/include/linux/ip.h.
 #[repr(transparent)]
 pub(crate) struct IpHeader(UnsafeCell<iphdr>);
 
 impl IpHeader {
+    /// Gets the protocol from the header.
     pub(crate) fn protocol(&self) -> Result<IpProtocol, error::Error> {
         // SAFETY: The existence of a shared reference means `self.0` is valid.
         IpProtocol::try_from(u32::from(unsafe {
@@ -305,17 +307,17 @@ impl IpHeader {
         }))
     }
 
+    /// Gets the source address from the header.
     pub(crate) fn source_addr(&self) -> Ipv4Addr {
         // SAFETY: The existence of a shared reference means `self.0` is valid.
-        let s_addr =
-            unsafe { core::ptr::addr_of!((*self.0.get()).__bindgen_anon_1.addrs.saddr).read() };
+        let s_addr = unsafe { core::ptr::addr_of!((*self.0.get()).__bindgen_anon_1.addrs.saddr).read() };
         Ipv4Addr(in_addr { s_addr })
     }
 
+    /// Gets the destination address from the header.
     pub(crate) fn destination_addr(&self) -> Ipv4Addr {
         // SAFETY: The existence of a shared reference means `self.0` is valid.
-        let s_addr =
-            unsafe { core::ptr::addr_of!((*self.0.get()).__bindgen_anon_1.addrs.daddr).read() };
+        let s_addr = unsafe { core::ptr::addr_of!((*self.0.get()).__bindgen_anon_1.addrs.daddr).read() };
         Ipv4Addr(in_addr { s_addr })
     }
 
@@ -332,7 +334,7 @@ impl IpHeader {
     }
 }
 
-/// Wrapper around the kernel's `struct sk_buff`.
+/// Wrapper around the kernel's [`struct sk_buff`]: srctree/include/linux/skbuff.h.
 #[repr(transparent)]
 pub(crate) struct SkBuff(UnsafeCell<sk_buff>);
 
@@ -372,15 +374,11 @@ impl SkBuff {
 
         // SAFETY: The existence of a shared reference means `self.0` is valid.
         let data = unsafe {
-            core::ptr::addr_of!((*self.0.get()).head)
-                .read()
-                .wrapping_add(
-                    core::ptr::addr_of!(
-                        (*self.0.get()).__bindgen_anon_4.headers.as_ref().mac_header
-                    )
+            core::ptr::addr_of!((*self.0.get()).head).read().wrapping_add(
+                core::ptr::addr_of!((*self.0.get()).__bindgen_anon_4.headers.as_ref().mac_header)
                     .read()
                     .into(),
-                )
+            )
         };
 
         // SAFETY: The `struct sk_buff` conventions guarantee that at least `skb_mac_header_len(skb)` bytes
@@ -392,19 +390,11 @@ impl SkBuff {
     pub(crate) fn ip_header_addr(&self) -> *mut u8 {
         // SAFETY: The existence of a shared reference means `self.0` is valid.
         unsafe {
-            core::ptr::addr_of!((*self.0.get()).head)
-                .read()
-                .wrapping_add(
-                    core::ptr::addr_of!(
-                        (*self.0.get())
-                            .__bindgen_anon_4
-                            .headers
-                            .as_ref()
-                            .network_header
-                    )
+            core::ptr::addr_of!((*self.0.get()).head).read().wrapping_add(
+                core::ptr::addr_of!((*self.0.get()).__bindgen_anon_4.headers.as_ref().network_header)
                     .read()
                     .into(),
-                )
+            )
         }
     }
 
@@ -417,26 +407,18 @@ impl SkBuff {
     pub(crate) fn transport_header(&self) -> *mut u8 {
         // SAFETY: The existence of a shared reference means `self.0` is valid.
         unsafe {
-            core::ptr::addr_of!((*self.0.get()).head)
-                .read()
-                .wrapping_add(
-                    core::ptr::addr_of!(
-                        (*self.0.get())
-                            .__bindgen_anon_4
-                            .headers
-                            .as_ref()
-                            .transport_header
-                    )
+            core::ptr::addr_of!((*self.0.get()).head).read().wrapping_add(
+                core::ptr::addr_of!((*self.0.get()).__bindgen_anon_4.headers.as_ref().transport_header)
                     .read()
                     .into(),
-                )
+            )
         }
     }
 }
 
 /// An IPv4 address.
 ///
-/// This is equivalent to C's `in_addr`.
+/// This is equivalent [`struct in_addr`]: srctree/include/linux/in.h in C API.
 #[repr(transparent)]
 #[derive(Clone, Copy)]
 pub(crate) struct Ipv4Addr(in_addr);
@@ -445,13 +427,13 @@ impl Ipv4Addr {
     /// A wildcard IPv4 address.
     ///
     /// Binding to this address means binding to all IPv4 addresses.
-    // pub(crate) const ANY: Self = Self::new(0, 0, 0, 0);
+    pub(crate) const ANY: Self = Self::new(0, 0, 0, 0);
 
     /// The IPv4 loopback address.
-    // pub(crate) const LOOPBACK: Self = Self::new(127, 0, 0, 1);
+    pub(crate) const LOOPBACK: Self = Self::new(127, 0, 0, 1);
 
     /// The IPv4 broadcast address.
-    // pub(crate) const BROADCAST: Self = Self::new(255, 255, 255, 255);
+    pub(crate) const BROADCAST: Self = Self::new(255, 255, 255, 255);
 
     /// Creates a new IPv4 address with the given components.
     #[allow(dead_code)]
@@ -476,6 +458,7 @@ impl core::fmt::Debug for Ipv4Addr {
     }
 }
 
+/// Wrapper around the kernel's [`struct tcphdr`]: srctree/include/linux/tcp.h.
 #[repr(transparent)]
 pub(crate) struct TcpHeader(UnsafeCell<tcphdr>);
 
@@ -492,17 +475,20 @@ impl TcpHeader {
         unsafe { &*ptr.cast() }
     }
 
+    /// Gets the destination port from the header.
     pub(crate) fn destination_port(&self) -> u16 {
         // SAFETY: The existence of a shared reference means `self.0` is valid.
         unsafe { core::ptr::addr_of!((*self.0.get()).dest).read() }.swap_bytes()
     }
 
+    /// Gets the source port from the header.
     pub(crate) fn source_port(&self) -> u16 {
         // SAFETY: The existence of a shared reference means `self.0` is valid.
         unsafe { core::ptr::addr_of!((*self.0.get()).source).read() }.swap_bytes()
     }
 }
 
+/// Wrapper around the kernel's [`struct udphdr`]: srctree/include/linux/udp.h.
 #[repr(transparent)]
 pub(crate) struct UdpHeader(UnsafeCell<udphdr>);
 
@@ -519,42 +505,48 @@ impl UdpHeader {
         unsafe { &*ptr.cast() }
     }
 
+    /// Gets the destination port from the header.
     pub(crate) fn destination_port(&self) -> u16 {
         // SAFETY: The existence of a shared reference means `self.0` is valid.
         unsafe { core::ptr::addr_of!((*self.0.get()).dest).read() }
     }
 
+    /// Gets the source port from the header.
     pub(crate) fn source_port(&self) -> u16 {
         // SAFETY: The existence of a shared reference means `self.0` is valid.
         unsafe { core::ptr::addr_of!((*self.0.get()).source).read() }
     }
 }
 
+/// Abstraction over TCP and UDP headers.
 pub(crate) enum TransportLayerProtocol<'a> {
     Udp { udp_header: &'a UdpHeader },
     Tcp { tcp_header: &'a TcpHeader },
 }
 
 impl<'a> TransportLayerProtocol<'a> {
+    /// Creates a new instance.
+    ///
+    /// #Arguments:
+    ///
+    /// * (skb)[SkBuff] - buffer with the metadata.
+    /// * (protocol)[IpProtocol] - protocol hint from [IpHeader]
     pub(crate) fn new(sk_buff: &'a SkBuff, protocol: IpProtocol) -> Result<Self, error::Error> {
         match protocol {
             IpProtocol::Tcp => {
-                let tcp_header =
-                    unsafe { TcpHeader::from_ptr(sk_buff.transport_header() as *const _) };
+                let tcp_header = unsafe { TcpHeader::from_ptr(sk_buff.transport_header() as *const _) };
                 Ok(Self::Tcp { tcp_header })
             }
             IpProtocol::Udp => {
-                let udp_header =
-                    unsafe { UdpHeader::from_ptr(sk_buff.transport_header() as *const _) };
+                let udp_header = unsafe { UdpHeader::from_ptr(sk_buff.transport_header() as *const _) };
                 Ok(Self::Udp { udp_header })
             }
-            _ => Err(error::Error::new(
-                "unsupported protocol",
-                error::Kind::Unsupported,
-            )),
+            // For the simplicity, only 2 protocols are supported.
+            _ => Err(error::Error::new("unsupported protocol", error::Kind::Unsupported)),
         }
     }
 
+    /// Returns the destination port of the packet.
     pub(crate) fn destination_port(&self) -> u16 {
         match self {
             Self::Udp { udp_header } => udp_header.destination_port(),
@@ -562,6 +554,7 @@ impl<'a> TransportLayerProtocol<'a> {
         }
     }
 
+    /// Returns the source port of the packet.
     pub(crate) fn source_port(&self) -> u16 {
         match self {
             Self::Udp { udp_header } => udp_header.source_port(),
@@ -570,12 +563,20 @@ impl<'a> TransportLayerProtocol<'a> {
     }
 }
 
+/// Represents a network packet and contains necessary information necessary to work with the packet.
 pub(crate) struct NetworkPacket<'a> {
+    /// Reference to the IP header of the packet.
     ip_header: &'a IpHeader,
+    /// Reference to the transport layer protocol of the packet.
     transport_layer: TransportLayerProtocol<'a>,
 }
 
 impl<'a> NetworkPacket<'a> {
+    /// Constructs a new instance.
+    ///
+    /// # Arguments:
+    ///
+    /// * [sk_buff](SkBuff): buffer with the metadata
     pub(crate) fn from_skb(sk_buff: &'a SkBuff) -> Result<Self, error::Error> {
         let ip_header = unsafe { IpHeader::from_ptr(sk_buff.ip_header_addr() as *const _) };
 
@@ -589,22 +590,27 @@ impl<'a> NetworkPacket<'a> {
         })
     }
 
+    /// Returns a destination address of the packet.
     pub(crate) fn destination_addr(&self) -> Ipv4Addr {
         self.ip_header.destination_addr()
     }
 
+    /// Returns a source address of the packet.
     pub(crate) fn source_addr(&self) -> Ipv4Addr {
         self.ip_header.source_addr()
     }
 
+    /// Returns a destination port of the packet.
     pub(crate) fn destination_port(&self) -> u16 {
         self.transport_layer.destination_port()
     }
 
+    /// Returns a source port of the packet.
     pub(crate) fn source_port(&self) -> u16 {
         self.transport_layer.source_port()
     }
 
+    /// Returns the protocol of the packet.
     pub(crate) fn protocol(&self) -> Result<IpProtocol, error::Error> {
         self.ip_header.protocol()
     }
