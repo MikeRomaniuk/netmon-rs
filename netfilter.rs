@@ -576,12 +576,12 @@ impl<'a> TransportLayerProtocol<'a> {
     }
 }
 
-pub(crate) struct TransportPacket<'a> {
+pub(crate) struct NetworkPacket<'a> {
     ip_header: &'a IpHeader,
     transport_layer: TransportLayerProtocol<'a>,
 }
 
-impl<'a> TransportPacket<'a> {
+impl<'a> NetworkPacket<'a> {
     pub(crate) fn from_skb(sk_buff: &'a SkBuff) -> Result<Self, error::Error> {
         let ip_header = unsafe { IpHeader::from_ptr(sk_buff.ip_header_addr() as *const _) };
 

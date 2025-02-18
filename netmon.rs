@@ -9,8 +9,8 @@ use kernel::netfilter::{nf_hook_state, sk_buff};
 use kernel::pr_cont;
 use kernel::prelude::*;
 use netfilter::{
-    HookNum, HookPriority, HookResponse, IpProtocol, Ipv4Addr, NetFilterHookOps, ProtocolFamily,
-    SkBuff, TransportPacket,
+    HookNum, HookPriority, HookResponse, IpProtocol, Ipv4Addr, NetFilterHookOps, NetworkPacket,
+    ProtocolFamily, SkBuff,
 };
 
 module! {
@@ -32,7 +32,7 @@ struct NetMon {
 
 impl NetMon {
     fn handle_packet(skb: &SkBuff) -> Result<(), error::Error> {
-        let packet = TransportPacket::from_skb(skb)?;
+        let packet = NetworkPacket::from_skb(skb)?;
 
         let source_addr = packet.source_addr();
         let destination_addr = packet.destination_addr();
