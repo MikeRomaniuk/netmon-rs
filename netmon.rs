@@ -26,7 +26,9 @@ static mut PROTOCOLS: Vec<IpProtocol> = Vec::new();
 static mut ADDRS: Vec<Ipv4Addr> = Vec::new();
 static mut PORTS: Vec<u16> = Vec::new();
 
+/// Structure, representing a kernel module.
 struct NetMon {
+    /// Netfilter hook operations.
     nfho: Pin<Box<NetFilterHookOps>>,
 }
 
@@ -90,19 +92,17 @@ impl NetMon {
     }
 
     fn new(mut nfho: Pin<Box<NetFilterHookOps>>) -> Result<Self, kernel::error::Error> {
-        use kernel::netfilter::init_net;
-
         // SAFETY: init_net should be valid at any point.
-        nfho.as_mut().register(unsafe { &mut init_net })?;
+        nfho.as_mut()
+            .register(unsafe { &mut kernel::netfilter::init_net })?;
 
         Ok(Self { nfho })
     }
 
     fn unregister_net_hook(&mut self) {
-        use kernel::netfilter::init_net;
-
         // SAFETY: init_net should be valid at any point.
-        self.nfho.unregister(unsafe { &mut init_net });
+        self.nfho
+            .unregister(unsafe { &mut kernel::netfilter::init_net });
     }
 }
 
@@ -111,6 +111,7 @@ unsafe impl Sync for NetMon {}
 
 impl kernel::Module for NetMon {
     fn init(_: &'static ThisModule) -> Result<Self> {
+        // Create a netfilter hook operations allocated on a heap
         let mut nfho: Pin<Box<NetFilterHookOps>> = Box::pin_init(NetFilterHookOps::new())?;
 
         {
@@ -172,5 +173,5 @@ pub unsafe extern "C" fn hook_fn(
         }
     }
 
-    HookResponse::Accept.into()
+    HookResponse::Accept as _
 }

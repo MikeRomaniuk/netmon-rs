@@ -51,7 +51,7 @@ impl NetFilterHookOps {
 
     /// Configures which hook point in the networking stack to attach to.
     pub(crate) fn set_hooknum(&mut self, hooknum: HookNum) {
-        self.inner.hooknum = hooknum.into()
+        self.inner.hooknum = hooknum as _
     }
 
     /// Specifies the protocol family this hook operates on.
@@ -175,46 +175,40 @@ impl From<HookPriority> for i32 {
     }
 }
 
-#[repr(u32)]
+/// Responses from hook functions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HookResponse {
-    Drop = netfilter::NF_DROP,
-    Accept = netfilter::NF_ACCEPT,
-    Stolen = netfilter::NF_STOLEN,
-    Queue = netfilter::NF_QUEUE,
-    Repeat = netfilter::NF_REPEAT,
-    Stop = netfilter::NF_STOP,
+pub(crate) enum HookResponse {
+    /// Drop the packet.
+    Drop = netfilter::NF_DROP as _,
+    /// Accept the packet.
+    Accept = netfilter::NF_ACCEPT as _,
+    /// Packet has been "stolen" or consumed by the hook function.
+    Stolen = netfilter::NF_STOLEN as _,
+    /// Queue the packet to userspace for processing.
+    Queue = netfilter::NF_QUEUE as _,
+    /// Run the current hook function again
+    Repeat = netfilter::NF_REPEAT as _,
+    /// Deprecated, for userspace [HookResponse::Queue] compatibility.
+    Stop = netfilter::NF_STOP as _,
 }
 
 impl HookResponse {
+    /// The highest possible verdict number.
     pub(crate) const MAX_VERDICT: HookResponse = HookResponse::Stop;
 }
 
-impl From<HookResponse> for u32 {
-    fn from(value: HookResponse) -> Self {
-        value as u32
-    }
-}
-
-#[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HookNum {
-    PreRouting = netfilter::nf_inet_hooks_NF_INET_PRE_ROUTING,
-    LocalIn = netfilter::nf_inet_hooks_NF_INET_LOCAL_IN,
-    Forward = netfilter::nf_inet_hooks_NF_INET_FORWARD,
-    LocalOut = netfilter::nf_inet_hooks_NF_INET_LOCAL_OUT,
-    PostRouting = netfilter::nf_inet_hooks_NF_INET_POST_ROUTING,
-    NumHooks = netfilter::nf_inet_hooks_NF_INET_NUMHOOKS,
+pub(crate) enum HookNum {
+    PreRouting = netfilter::nf_inet_hooks_NF_INET_PRE_ROUTING as _,
+    LocalIn = netfilter::nf_inet_hooks_NF_INET_LOCAL_IN as _,
+    Forward = netfilter::nf_inet_hooks_NF_INET_FORWARD as _,
+    LocalOut = netfilter::nf_inet_hooks_NF_INET_LOCAL_OUT as _,
+    PostRouting = netfilter::nf_inet_hooks_NF_INET_POST_ROUTING as _,
+    NumHooks = netfilter::nf_inet_hooks_NF_INET_NUMHOOKS as _,
 }
 
 impl HookNum {
-    pub const INGRESS: HookNum = HookNum::NumHooks;
-}
-
-impl From<HookNum> for u32 {
-    fn from(value: HookNum) -> Self {
-        value as u32
-    }
+    pub(crate) const INGRESS: HookNum = HookNum::NumHooks;
 }
 
 #[repr(u32)]
