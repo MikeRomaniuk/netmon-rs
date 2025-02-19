@@ -6,13 +6,13 @@
 use core::cell::UnsafeCell;
 
 use kernel::error::to_result;
+// `netfilter` is my bindings crate with all headers I need.
 use kernel::netfilter;
 use kernel::netfilter::{
     in_addr, iphdr, net, nf_hook_ops, nf_hookfn, nf_register_net_hook, nf_unregister_net_hook, sk_buff, tcphdr, udphdr,
 };
 use kernel::prelude::*;
 
-// `netfilter` is my bindings crate with all headers I need.
 use crate::error;
 
 /// A safe wrapper around the kernel's [`struct nf_hook_ops`]: srctree/include/linux/netfilter.h.
@@ -87,6 +87,7 @@ impl NetFilterHookOps {
     }
 }
 
+/// Represents network protocol families.
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProtocolFamily {
@@ -150,6 +151,7 @@ impl From<ProtocolFamily> for u8 {
     }
 }
 
+/// Represents priority levels for netfilter hooks.
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HookPriority {
@@ -179,7 +181,7 @@ impl From<HookPriority> for i32 {
     }
 }
 
-/// Responses from hook functions.
+/// Represents possible return values from netfilter hook callback functions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum HookResponse {
     /// Drop the packet.
@@ -190,14 +192,15 @@ pub(crate) enum HookResponse {
     Stolen = netfilter::NF_STOLEN as _,
     /// Queue the packet to userspace for processing.
     Queue = netfilter::NF_QUEUE as _,
-    /// Run the current hook function again
+    /// Run the current hook function again.
     Repeat = netfilter::NF_REPEAT as _,
-    /// Deprecated, for userspace [HookResponse::Queue] compatibility.
+    #[deprecated(note = "Deprecated, for userspace nf_queue compatibility.")]
     Stop = netfilter::NF_STOP as _,
 }
 
 impl HookResponse {
     /// The highest possible verdict number.
+    #[allow(deprecated)]
     pub(crate) const MAX_VERDICT: HookResponse = HookResponse::Stop;
 }
 
@@ -215,6 +218,7 @@ impl HookNum {
     pub(crate) const INGRESS: HookNum = HookNum::NumHooks;
 }
 
+/// Represents IP protocols used in network packet headers
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IpProtocol {
@@ -416,7 +420,7 @@ impl SkBuff {
     }
 }
 
-/// An IPv4 address.
+/// Represents an IPv4 address.
 ///
 /// This is equivalent [`struct in_addr`]: srctree/include/linux/in.h in C API.
 #[repr(transparent)]
@@ -436,7 +440,6 @@ impl Ipv4Addr {
     pub(crate) const BROADCAST: Self = Self::new(255, 255, 255, 255);
 
     /// Creates a new IPv4 address with the given components.
-    #[allow(dead_code)]
     pub(crate) const fn new(a: u8, b: u8, c: u8, d: u8) -> Self {
         Self(in_addr {
             s_addr: u32::from_be_bytes([a, b, c, d]),
@@ -530,7 +533,7 @@ impl<'a> TransportLayerProtocol<'a> {
     /// #Arguments:
     ///
     /// * (skb)[SkBuff] - buffer with the metadata.
-    /// * (protocol)[IpProtocol] - protocol hint from [IpHeader]
+    /// * (protocol)[IpProtocol] - protocol hint from [IpHeader].
     pub(crate) fn new(sk_buff: &'a SkBuff, protocol: IpProtocol) -> Result<Self, error::Error> {
         match protocol {
             IpProtocol::Tcp => {
@@ -576,7 +579,7 @@ impl<'a> NetworkPacket<'a> {
     ///
     /// # Arguments:
     ///
-    /// * [sk_buff](SkBuff): buffer with the metadata
+    /// * [sk_buff](SkBuff): buffer with the metadata.
     pub(crate) fn from_skb(sk_buff: &'a SkBuff) -> Result<Self, error::Error> {
         let ip_header = unsafe { IpHeader::from_ptr(sk_buff.ip_header_addr() as *const _) };
 
